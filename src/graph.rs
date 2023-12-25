@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 
 pub trait Pratition {
     fn vertex_partition(&self, vid : &Vid) -> usize;
-    fn edge_partition(&self, edge : &Edge) -> usize;
+    fn edge_partition<EDATA>(&self, edge : &Edge<EDATA>) -> usize;
 }
 
 struct HashPartition {}
@@ -25,27 +25,27 @@ impl Pratition for HashPartition {
         self.hash(vid) as usize
     }
 
-    fn edge_partition(&self, edge : &Edge) -> usize {
+    fn edge_partition<EDATA>(&self, edge : &Edge<EDATA>) -> usize {
         self.hash(&edge.from) as usize
     }
 }
 
 trait Graph {
-    
+    type EDATA;
+    fn new(edges : Vec<Edge<Self::EDATA>>);
 }
 
-// 
-struct NearEdge {
+struct NearEdge<EDATA> {
     to : Vid,
-    data : Data,
+    data : EDATA,
 }
 
-struct NearGraph {
-    g : Vec<Vec<NearEdge>>
+struct NearGraph<EDATA> {
+    g : Vec<Vec<NearEdge<EDATA>>>
 }
 
-impl NearEdge {
-    fn new(edges : Vec<Edge>) {
+impl<EDATA> NearEdge<EDATA> {
+    fn new(edges : Vec<Edge<String>>) {
         todo!()
     }
 }

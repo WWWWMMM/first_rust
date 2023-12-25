@@ -98,7 +98,7 @@ impl MyMpi for SyncCommunicationer {
                     let rank = self.rank as u32;
                     println!("rank {} spawn send task.", self.rank);
                     set.spawn(async move {
-                        let mut client = CommunicationClient::connect(endpoint).await.unwrap();
+                        let mut client = CommunicationClient::connect(endpoint).await.expect(&format!("rank {rank} connect failed"));
                         let mut splited_msg = msg.chunks(MAX_BYTE_SEND_PER_MSG).map(|x| {
                             Bytes {val : x.to_vec(), from : rank, finish : false}
                         }).collect::<Vec<Bytes>>();
@@ -150,7 +150,7 @@ mod tests {
         let communicatoner =  SyncCommunicationer {
             addr: "[::1]:10000".parse().unwrap(),
             rank: 0,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10001")],
+            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
         };
         let msg = vec![vec![0u8; LEN]; 2];
         let mut recv = communicatoner.send_recv(msg);
@@ -164,9 +164,9 @@ mod tests {
     #[test]
     fn test_send_recv1() {
         let communicatoner =  SyncCommunicationer {
-            addr: "[::1]:10001".parse().unwrap(),
+            addr: "[::1]:10002".parse().unwrap(),
             rank: 1,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10001")],
+            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
         };
         let msg = vec![vec![1u8; LEN]; 2];
         let mut recv = communicatoner.send_recv(msg);

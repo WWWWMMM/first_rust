@@ -22,7 +22,6 @@ pub struct Vertexus {
     data : String
 }
 
-
 pub struct Vertex {
     id : Vid,
     data : Data
