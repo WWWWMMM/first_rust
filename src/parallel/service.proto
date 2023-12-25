@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package communication;
+
+service Communication {
+  rpc Send(Bytes) returns (Ack) {}
+}
+
+message Bytes {
+  bytes val = 1;
+  uint32 from = 2;
+  bool finish = 3;
+}
+
+message Ack {
+  string msg = 1;
+}
