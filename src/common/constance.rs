@@ -1,1 +1,1 @@
-pub const MAX_BYTE_SEND_PER_MSG : usize = 4190000; // 4194304 max 
+pub const MAX_BYTE_SEND_PER_MSG : usize = 4194304 - 7; // 4194304 max 

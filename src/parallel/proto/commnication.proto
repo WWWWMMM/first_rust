@@ -3,7 +3,7 @@ syntax = "proto3";
 package communication;
 
 service Communication {
-  rpc Send(Bytes) returns (Ack) {}
+  rpc Send(stream Bytes) returns (Ack) {}
 }
 
 message Bytes {

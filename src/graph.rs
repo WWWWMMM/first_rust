@@ -1,6 +1,6 @@
 use crate::common::base_structure::{Vid, Edge, Data};
 use crate::parallel::server::SyncCommunicationer;
-use crate::parallel::server::routeguide::communication_server::Communication;
+use crate::parallel::communication::communication_server::Communication;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

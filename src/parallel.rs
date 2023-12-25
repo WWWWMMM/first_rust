@@ -1,6 +1,7 @@
 use crate::util;
 pub mod server;
 pub mod connection;
+pub mod communication;
 
 pub struct bsp_opts {
     send_threads : u8,

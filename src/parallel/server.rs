@@ -7,17 +7,17 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
+use tokio_stream::StreamExt;
+use tonic::Streaming;
 use tonic::transport::Endpoint;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
-use routeguide::communication_server::{Communication, CommunicationServer};
-use routeguide::communication_client::CommunicationClient;
-use routeguide::{Bytes, Ack};
+use super::communication;
+use communication::communication_server::{Communication, CommunicationServer};
+use communication::communication_client::CommunicationClient;
+use communication::{Bytes, Ack};
 
-pub mod routeguide {
-    tonic::include_proto!("communication");
-}
 use crate::common::constance::MAX_BYTE_SEND_PER_MSG;
 
 struct Receiver {
@@ -28,15 +28,23 @@ struct Receiver {
 impl Communication for Receiver {
     async fn send(
         &self,
-        request: Request<Bytes>,
-    ) -> Result<Response<Ack>, Status> {
-        let bytes = request.into_inner();
-        let recv_len = bytes.val.len().to_string();
-        {
+        request: tonic::Request<Streaming<communication::Bytes>>,
+    ) -> std::result::Result<tonic::Response<Ack>, tonic::Status> {
+        let mut stream = request.into_inner();
+        let mut count = 0;
+        let mut from = u32::MAX;
+        println!("recv {from} begin.");
+        while let Some(bytes) = stream.next().await {
+            let bytes = bytes?;
+            count += bytes.val.len();
+            if from != u32::MAX {
+                assert_eq!(from, bytes.from);
+            }
+            from = bytes.from;
             let channel = self.channel.lock().await;
             channel.send(bytes).await.unwrap();
-        }
-        Ok(Response::new(Ack{msg : recv_len}))
+        }   
+        Ok(Response::new(Ack{msg : format!("recv rank {from}: {count} bytes.")}))
     }
 }
 
@@ -91,24 +99,14 @@ impl MyMpi for SyncCommunicationer {
                     println!("rank {} spawn send task.", self.rank);
                     set.spawn(async move {
                         let mut client = CommunicationClient::connect(endpoint).await.unwrap();
-                        let mut start = 0;
-                        let mut end;
-                        loop {
-                            end = std::cmp::min(start + MAX_BYTE_SEND_PER_MSG, msg.len());
-                            let bytes = Bytes {
-                                val : msg[start..end].to_vec(),
-                                from : rank,
-                                finish : end == msg.len()
-                            };
-                            match client.send(Request::new(bytes)).await {
-                                Ok(response) => println!("{} recv Ack: {:?}", rank, response.into_inner()),
-                                Err(e) => println!("something went wrong: {:?}", e),
-                            };
-                            start += MAX_BYTE_SEND_PER_MSG;
-                            if start >= msg.len() {
-                                break;
-                            }
-                        }
+                        let mut splited_msg = msg.chunks(MAX_BYTE_SEND_PER_MSG).map(|x| {
+                            Bytes {val : x.to_vec(), from : rank, finish : false}
+                        }).collect::<Vec<Bytes>>();
+                        splited_msg.last_mut().unwrap().finish = true;
+                        match client.send(Request::new(tokio_stream::iter(splited_msg))).await {
+                            Ok(response) => println!("{} recv Ack: {:?}", rank, response.into_inner()),
+                            Err(e) => println!("something went wrong: {:?}", e),
+                        };
                     });
                 }
             }
@@ -118,9 +116,9 @@ impl MyMpi for SyncCommunicationer {
             finish[self.rank] = true;
             let mut finish_count = 1;
             while let Some(mut bytes) = recv.recv().await {
+                assert!(finish[bytes.from as usize] == false);
                 res[bytes.from as usize].append(&mut bytes.val);
                 if bytes.finish {
-                    assert!(finish[bytes.from as usize] == false);
                     finish[bytes.from as usize] = true;
                     finish_count += 1;
                     if finish_count == partitions {
