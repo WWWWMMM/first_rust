@@ -1,28 +1,17 @@
 use std::str::FromStr;
 
+use arrow::array::ArrayRef;
+
 use super::data::Data;
 
-#[derive(Debug, Hash)]
-pub struct Vid(u32);
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ParseVidError;
-
-impl FromStr for Vid {
-    type Err = ParseVidError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let val = s.parse::<u32>().map_err(|_| ParseVidError)?;
-        Ok(Vid(val))
-    }
-}
+pub type Vid = u32;
 
 pub struct Vertexus {
     id : Vid,
     data : String
 }
 
-pub struct Vertex {
+pub struct Vertex<T> {
     id : Vid,
-    data : Data
+    data : T
 }

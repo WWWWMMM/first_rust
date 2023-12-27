@@ -45,7 +45,7 @@ struct NearGraph<EDATA> {
 }
 
 impl<EDATA> NearEdge<EDATA> {
-    fn new(edges : Vec<Edge<String>>) {
+    fn new(edges : Vec<Edge<EDATA>>) {
         todo!()
     }
 }
