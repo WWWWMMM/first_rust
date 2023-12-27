@@ -1,6 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::marker::Send;
 
+use bincode::Decode;
+use bincode::Encode;
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -11,7 +16,7 @@ use tokio_stream::StreamExt;
 use tonic::Streaming;
 use tonic::transport::Endpoint;
 use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response};
 
 use super::communication;
 use communication::communication_server::{Communication, CommunicationServer};
@@ -19,6 +24,7 @@ use communication::communication_client::CommunicationClient;
 use communication::{Bytes, Ack};
 
 use crate::common::constance::MAX_BYTE_SEND_PER_MSG;
+use crate::util::Serilazer;
 
 struct Receiver {
     channel : Arc<Mutex<Sender<Bytes>>>,
@@ -50,7 +56,14 @@ impl Communication for Receiver {
 
 trait MyMpi {
     // 将msgs[i] 发送到rank i, 同时接受所有收到的消息, 返回值中第i个值为rank i发来的消息
-    fn send_recv(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>>;
+    fn send_recv_binary(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>>;
+
+    // 将msgs[i] 发送到rank i, 同时接受所有收到的消息, 返回值中第i个值为rank i发来的消息
+    fn send_recv<MSG>(&self, msgs : Vec<MSG>) -> Vec<MSG>
+    where 
+        MSG : Encode + Decode + Send,
+        Vec<MSG>: IntoParallelIterator<Item = MSG>,
+    ;
 }
 
 #[derive(Debug)]
@@ -61,8 +74,7 @@ pub struct SyncCommunicationer {
 }
 
 impl MyMpi for SyncCommunicationer {
-    
-    fn send_recv(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    fn send_recv_binary(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>> {
         let mut msgs = msgs;
         let rt  = Runtime::new().unwrap();
         rt.block_on(async {
@@ -135,10 +147,28 @@ impl MyMpi for SyncCommunicationer {
             res
         })
     }
+
+    fn send_recv<MSG>(&self, msgs : Vec<MSG>) -> Vec<MSG>
+    where 
+        MSG : Encode + Decode + Send,
+        Vec<MSG>: IntoParallelIterator<Item = MSG>,
+     {
+        let serilazer = Serilazer::new();
+        let msgs : Vec<Vec<u8>> = msgs.into_par_iter().map(|x|{
+            serilazer.encode(x)
+        }).collect();
+
+        let recv = self.send_recv_binary(msgs);
+
+        recv.into_par_iter().map(|x|{
+            serilazer.decode(x)
+        }).collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use bincode::{Encode, Decode};
     use tonic::transport::Endpoint;
 
     use crate::parallel::server::MyMpi;
@@ -146,14 +176,14 @@ mod tests {
     use super::SyncCommunicationer;
     const LEN : usize = 5000000;
     #[test]
-    fn test_send_recv0() {
+    fn send_recv_binary0() {
         let communicatoner =  SyncCommunicationer {
             addr: "[::1]:10000".parse().unwrap(),
             rank: 0,
             endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
         };
         let msg = vec![vec![0u8; LEN]; 2];
-        let mut recv = communicatoner.send_recv(msg);
+        let mut recv = communicatoner.send_recv_binary(msg);
 
         recv.sort();
         assert_eq!(recv[0].len(), LEN);
@@ -162,18 +192,55 @@ mod tests {
     }
 
     #[test]
-    fn test_send_recv1() {
+    fn send_recv_binary1() {
         let communicatoner =  SyncCommunicationer {
             addr: "[::1]:10002".parse().unwrap(),
             rank: 1,
             endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
         };
         let msg = vec![vec![1u8; LEN]; 2];
-        let mut recv = communicatoner.send_recv(msg);
+        let mut recv = communicatoner.send_recv_binary(msg);
 
         recv.sort();
         assert_eq!(recv[0].len(), LEN);
         assert_eq!(recv[1].len(), LEN);
         assert_eq!(recv, vec![vec![0u8; LEN], vec![1u8; LEN]]);
     }
+
+    #[derive(Debug, Encode, Decode, Clone, PartialEq)]
+    struct TestMsg {
+        a : i32,
+        b : f32,
+        c : String,
+    }
+
+    #[test]
+    fn send_recv0() {
+        let communicatoner =  SyncCommunicationer {
+            addr: "[::1]:10000".parse().unwrap(),
+            rank: 0,
+            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
+        };
+        let msg = vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN]; 2];
+        let mut recv = communicatoner.send_recv(msg);
+
+        assert_eq!(recv, vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN],
+                        vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]]);
+    }
+
+    #[test]
+    fn send_recv() {
+        let communicatoner =  SyncCommunicationer {
+            addr: "[::1]:10002".parse().unwrap(),
+            rank: 1,
+            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
+        };
+        let msg = vec![vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]; 2];
+        let mut recv = communicatoner.send_recv(msg);
+
+        assert_eq!(recv, vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN],
+                        vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]]);
+    }
+
+
 }
