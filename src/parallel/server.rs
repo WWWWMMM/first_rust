@@ -164,7 +164,7 @@ impl MyMpi for SyncCommunicationer {
             shotdown_send.send(()).unwrap();
             while let Some(_) = set.join_next().await {}
 
-            // println!("send {all_length} cost: {:?}", Instant::now() - t0);
+            println!("send {all_length} cost: {:?}", Instant::now() - t0);
             res
         })
     }
@@ -180,7 +180,7 @@ impl MyMpi for SyncCommunicationer {
         let msgs : Vec<Vec<u8>> = msgs.into_par_iter().map(|x|{
             serilazer.encode(x)
         }).collect();
-        // println!("encode cost: {:?}", Instant::now() - t0);
+        println!("encode cost: {:?}", Instant::now() - t0);
 
         let recv = self.send_recv_binary(msgs);
 
@@ -188,7 +188,7 @@ impl MyMpi for SyncCommunicationer {
         let res = recv.into_par_iter().map(|x|{
             serilazer.decode(x)
         }).collect();
-        // println!("decode cost: {:?}", Instant::now() - t1);
+        println!("decode cost: {:?}", Instant::now() - t1);
 
         res
     }

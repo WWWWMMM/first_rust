@@ -7,6 +7,7 @@ use crate::parallel::server::MyMpi;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct GraphInfo {
@@ -50,7 +51,7 @@ impl GraphInfo {
     }
 }
 
-pub trait Pratition {
+pub trait Pratition : Debug {
     fn vertex_partition(&self, vid : &Vid) -> usize;
     fn edge_partition<EDATA>(&self, edge : &Edge<EDATA>) -> usize;
 }
@@ -66,6 +67,7 @@ pub trait SeqPartition : Pratition {
     fn end_id(&self) -> Vid;
 }
 
+#[derive(Debug)]
 struct HashPartition {}
 
 impl HashPartition {
@@ -119,6 +121,7 @@ impl SeqPartition for SeqSPartition {
         EDATA : Clone + Send,
         Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
     {
+        println!("impl partition");
         let partitions = communication.get_cluster_info().partitions;
         let msgs = 
             edges
@@ -128,8 +131,14 @@ impl SeqPartition for SeqSPartition {
                     vec![vec![]; partitions]
                 }, 
                 |mut a, b|{
-                    let p = self.edge_partition(&b);
-                    a[p].push(b);
+                    let p1 = self.vertex_partition(&b.from);
+                    let p2 = self.vertex_partition(&b.to);
+                    if p1 != p2 {
+                        a[p2].push(b);
+                    }else {
+                        a[p1].push(b.clone());
+                        a[p2].push(b);
+                    }
                     a
                 })
             .reduce(
@@ -203,7 +212,7 @@ where
 impl<EDATA, PART> NearGraph<EDATA, PART> 
 where
     PART : SeqPartition + Sync,
-    EDATA : Clone + Send + Sync,
+    EDATA : Clone + Send + Sync + Debug,
     Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
 {
     pub fn nbr(&self, id : usize) -> &Vec<NearEdge<EDATA>> {
@@ -216,21 +225,21 @@ where
         let cluster_info = communication.get_cluster_info();
         let partition = PART::new(vec![], &graph_info, cluster_info);
         let edges = partition.impl_partition(edges, communication);
-        let start_id = partition.start_id() as usize;
-        let local_vertexs = partition.end_id() as usize - start_id;
+        let global_vertexs = graph_info.vertex_num as usize;
         let g = edges
             .into_par_iter()
             .fold(
                 ||{
-                    vec![vec![]; local_vertexs]
+                    vec![vec![]; global_vertexs]
                 }, 
                 |mut a, b|{
-                    a[b.from as usize - start_id].push(NearEdge{to : b.to, data : b.data });
+                    a[b.from as usize].push(NearEdge{to : b.to, data : b.data.clone() });
+                    a[b.to as usize].push(NearEdge{to : b.from, data : b.data });
                     a
                 })
             .reduce(
                 ||{
-                    vec![vec![]; local_vertexs]
+                    vec![vec![]; global_vertexs]
                 }, 
                 |mut vec1, vec2| {
                     vec1
@@ -244,12 +253,13 @@ where
                         .collect()
                 }
             );
-
-        NearGraph {
+        let build_result = NearGraph {
             graph_info : graph_info,
             g : g,
             partition : partition
-        }
+        };
+        println!("{:?}", build_result);
+        build_result
     }
 }
 

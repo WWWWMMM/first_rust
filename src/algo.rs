@@ -1,4 +1,5 @@
 use bincode::{Encode, Decode};
+use std::{fmt::Debug, time::Instant};
 use rayon::iter::{IntoParallelRefMutIterator, IntoParallelRefIterator, ParallelIterator, IntoParallelIterator, IndexedParallelIterator};
 
 use crate::{graph::{Graph, SeqPartition, NearGraph}, common::{base_structure::{Edge, Vid}, util::SharedPtr}, parallel::server::MyMpi};
@@ -6,7 +7,7 @@ use crate::{graph::{Graph, SeqPartition, NearGraph}, common::{base_structure::{E
 fn pagerank<EDATA, PART>(graph : NearGraph<EDATA, PART>, communication : &impl MyMpi) -> Vec<f32> 
 where
     PART : SeqPartition + Sync,
-    EDATA : Clone + Send + Sync,
+    EDATA : Clone + Send + Sync + Debug,
     Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
 {
     let vertexs = graph.graph_info.vertex_num as usize;
@@ -30,28 +31,39 @@ where
         recv.into_par_iter().flatten().collect()
     };
 
-    // let iteration = 20;
-    // let damping = 0.85;
-    // let p = SharedPtr::new(local_pr.as_mut_ptr());
-    // for i in 0..iteration {
-    //     println!("\n\n\n\n");
-    //     let msgs = vec![local_pr.clone(); communication.partitions()];
+    let iteration = 20;
+    let damping = 0.85;
+    let p = SharedPtr::new(local_pr.as_mut_ptr());
+    for i in 0..iteration {
+        let t00 = Instant::now();
+        println!("iter: {i}");
+        let mut t0 = Instant::now();
+        let msgs = vec![local_pr.clone(); communication.partitions()];
+        println!("prepare msgs cost: {:?}", Instant::now() - t0);
 
-    //     let recv = communication.send_recv::<Vec<f32>>(msgs);
+        t0 = Instant::now();
+        let recv = communication.send_recv::<Vec<f32>>(msgs);
+        println!("send_recv cost: {:?}", Instant::now() - t0);
 
-    //     let global_pr : Vec<f32> = recv.into_par_iter().flatten().collect();
+        t0 = Instant::now();
+        let global_pr : Vec<f32> = recv.into_par_iter().flatten().collect();
+        println!("get global_pr cost: {:?}", Instant::now() - t0);
 
-    //     (start_id..end_id).into_par_iter().for_each(|id|{
-    //         let nbr = graph.nbr(id);
-    //         let mut sum = 0.0;
-    //         nbr.iter().for_each(|edge| {
-    //             sum += global_pr[edge.to as usize] / global_degree[edge.to as usize] as f32;
-    //         });
-    //         unsafe {
-    //             *p.add(id) = 1.0 - damping + damping * sum;
-    //         };
-    //     }) 
-    // }
+        t0 = Instant::now();
+        (start_id..end_id).into_par_iter().for_each(|id|{
+            let nbr = graph.nbr(id);
+            let mut sum = 0.0;
+            nbr.iter().for_each(|edge| {
+                sum += global_pr[edge.to as usize] / global_degree[edge.to as usize] as f32;
+            });
+            unsafe {
+                *p.add(id) = 1.0 - damping + damping * sum;
+            };
+        });
+        println!("calc local pr cost: {:?}", Instant::now() - t0);
+
+        println!("------------------------------iter {i} cost: {:?}", Instant::now() - t00);
+    }
 
     local_pr
 }
@@ -75,6 +87,8 @@ mod tests {
 
         let graph = NearGraph::<MyEmpty, SeqSPartition>::new(edges, &communicatoner);
 
+        println!("graph build compelete");
+
         let pr = pagerank(graph, &communicatoner);
 
         println!("rank 0: {:?}", pr);
@@ -85,7 +99,9 @@ mod tests {
         let communicatoner = com_for_test(5, 6, 1);
         let edges = vec![];
 
-        let graph = NearGraph::<MyEDATA, SeqSPartition>::new(edges, &communicatoner);
+        let graph = NearGraph::<MyEmpty, SeqSPartition>::new(edges, &communicatoner);
+
+        println!("graph build compelete");
 
         let pr = pagerank(graph, &communicatoner);
 
