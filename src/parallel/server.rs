@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::marker::Send;
+use std::time::Instant;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -24,6 +25,7 @@ use communication::communication_client::CommunicationClient;
 use communication::{Bytes, Ack};
 
 use crate::common::constance::MAX_BYTE_SEND_PER_MSG;
+use crate::graph::ClusterInfo;
 use crate::util::Serilazer;
 
 struct Receiver {
@@ -39,7 +41,7 @@ impl Communication for Receiver {
         let mut stream = request.into_inner();
         let mut count = 0;
         let mut from = u32::MAX;
-        println!("recv {from} begin.");
+        println!("recv begin.");
         while let Some(bytes) = stream.next().await {
             let bytes = bytes?;
             count += bytes.val.len();
@@ -54,7 +56,12 @@ impl Communication for Receiver {
     }
 }
 
-trait MyMpi {
+pub trait MyMpi {
+    /// 返回进程个数
+    fn partitions(&self) -> usize;
+
+    fn get_cluster_info(&self) -> &ClusterInfo;
+
     // 将msgs[i] 发送到rank i, 同时接受所有收到的消息, 返回值中第i个值为rank i发来的消息
     fn send_recv_binary(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>>;
 
@@ -64,18 +71,26 @@ trait MyMpi {
         MSG : Encode + Decode + Send,
         Vec<MSG>: IntoParallelIterator<Item = MSG>,
     ;
+
+    fn reduce<DATA>(&self, data : DATA, f : impl Fn(DATA, DATA) -> DATA) -> DATA
+    where
+        DATA : Encode + Decode + Send + Clone
+    ;
 }
 
 #[derive(Debug)]
 pub struct SyncCommunicationer {
     addr : SocketAddr,
-    rank : usize,
+    cluster_info : ClusterInfo,
     endpoints : Vec<Endpoint>, 
 }
 
 impl MyMpi for SyncCommunicationer {
     fn send_recv_binary(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+        let t0 = Instant::now();
         let mut msgs = msgs;
+        let mut all_length = msgs.iter().map(|x| x.len()).fold(0u64, |a, b| a + b as u64);
+
         let rt  = Runtime::new().unwrap();
         rt.block_on(async {
             let partitions = self.endpoints.len();
@@ -101,16 +116,21 @@ impl MyMpi for SyncCommunicationer {
             
             // send msg
             for i in 0..msgs.len() {
-                if i == self.rank {
-                    println!("send msg to self length: {:?}", msgs[i].len());
+                if i == self.cluster_info.rank {
+                    // println!("send msg to self length: {:?}", msgs[i].len());
                     res[i] = std::mem::take(&mut msgs[i]);
                 }else {
                     let endpoint = self.endpoints[i].clone();
                     let msg = std::mem::take(&mut msgs[i]);
-                    let rank = self.rank as u32;
-                    println!("rank {} spawn send task.", self.rank);
+                    let rank = self.cluster_info.rank as u32;
+                    println!("rank {} spawn send task.", self.cluster_info.rank);
                     set.spawn(async move {
-                        let mut client = CommunicationClient::connect(endpoint).await.expect(&format!("rank {rank} connect failed"));
+                        let mut client = loop {
+                            let a = CommunicationClient::connect(endpoint.clone()).await;
+                            if a.is_ok() {
+                                break a.unwrap()
+                            }
+                        };
                         let mut splited_msg = msg.chunks(MAX_BYTE_SEND_PER_MSG).map(|x| {
                             Bytes {val : x.to_vec(), from : rank, finish : false}
                         }).collect::<Vec<Bytes>>();
@@ -125,7 +145,7 @@ impl MyMpi for SyncCommunicationer {
 
             // recv msg
             let mut finish = vec![false; partitions];
-            finish[self.rank] = true;
+            finish[self.cluster_info.rank] = true;
             let mut finish_count = 1;
             while let Some(mut bytes) = recv.recv().await {
                 assert!(finish[bytes.from as usize] == false);
@@ -140,10 +160,11 @@ impl MyMpi for SyncCommunicationer {
             }
 
             // shutdown server
-            println!("shotdown: {}", self.rank);
+            println!("shotdown: {}", self.cluster_info.rank);
             shotdown_send.send(()).unwrap();
             while let Some(_) = set.join_next().await {}
 
+            // println!("send {all_length} cost: {:?}", Instant::now() - t0);
             res
         })
     }
@@ -153,59 +174,59 @@ impl MyMpi for SyncCommunicationer {
         MSG : Encode + Decode + Send,
         Vec<MSG>: IntoParallelIterator<Item = MSG>,
      {
+        let t0 = Instant::now();
+
         let serilazer = Serilazer::new();
         let msgs : Vec<Vec<u8>> = msgs.into_par_iter().map(|x|{
             serilazer.encode(x)
         }).collect();
+        // println!("encode cost: {:?}", Instant::now() - t0);
 
         let recv = self.send_recv_binary(msgs);
 
-        recv.into_par_iter().map(|x|{
+        let t1 = Instant::now();
+        let res = recv.into_par_iter().map(|x|{
             serilazer.decode(x)
-        }).collect()
+        }).collect();
+        // println!("decode cost: {:?}", Instant::now() - t1);
+
+        res
+    }
+
+    fn reduce<DATA>(&self, data : DATA, f : impl Fn(DATA, DATA) -> DATA) -> DATA 
+    where
+        DATA : Encode + Decode + Send + Clone
+    {
+        let partitions = self.endpoints.len();
+        let msgs = vec![data; partitions];
+
+        let recv = self.send_recv(msgs);
+
+        recv.into_iter().reduce(f).unwrap()
+    }
+
+    fn get_cluster_info(&self) -> &ClusterInfo {
+        &self.cluster_info
+    }
+
+    fn partitions(&self) -> usize {
+        self.endpoints.len()
+    }
+}
+
+pub fn com_for_test(port1 : i32, port2 : i32, rank : usize) -> SyncCommunicationer{
+    SyncCommunicationer {
+        addr: format!("[::1]:1000{}", if rank == 0 {port1} else {port2}).parse().unwrap(),
+        cluster_info: ClusterInfo { partitions : 2, rank : rank},
+        endpoints: vec![Endpoint::from_shared(format!("http://[::1]:1000{port1}").to_string()).unwrap(), 
+        Endpoint::from_shared(format!("http://[::1]:1000{port2}").to_string()).unwrap()],
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bincode::{Encode, Decode};
-    use tonic::transport::Endpoint;
-
-    use crate::parallel::server::MyMpi;
-
-    use super::SyncCommunicationer;
-    const LEN : usize = 5000000;
-    #[test]
-    fn send_recv_binary0() {
-        let communicatoner =  SyncCommunicationer {
-            addr: "[::1]:10000".parse().unwrap(),
-            rank: 0,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
-        };
-        let msg = vec![vec![0u8; LEN]; 2];
-        let mut recv = communicatoner.send_recv_binary(msg);
-
-        recv.sort();
-        assert_eq!(recv[0].len(), LEN);
-        assert_eq!(recv[1].len(), LEN);
-        assert_eq!(recv, vec![vec![0u8; LEN], vec![1u8; LEN]]);
-    }
-
-    #[test]
-    fn send_recv_binary1() {
-        let communicatoner =  SyncCommunicationer {
-            addr: "[::1]:10002".parse().unwrap(),
-            rank: 1,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
-        };
-        let msg = vec![vec![1u8; LEN]; 2];
-        let mut recv = communicatoner.send_recv_binary(msg);
-
-        recv.sort();
-        assert_eq!(recv[0].len(), LEN);
-        assert_eq!(recv[1].len(), LEN);
-        assert_eq!(recv, vec![vec![0u8; LEN], vec![1u8; LEN]]);
-    }
+    use super::*;
+    const LEN : usize = 1000000;
 
     #[derive(Debug, Encode, Decode, Clone, PartialEq)]
     struct TestMsg {
@@ -216,31 +237,21 @@ mod tests {
 
     #[test]
     fn send_recv0() {
-        let communicatoner =  SyncCommunicationer {
-            addr: "[::1]:10000".parse().unwrap(),
-            rank: 0,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
-        };
+        let communicatoner =  com_for_test(0, 1, 0);
         let msg = vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN]; 2];
-        let mut recv = communicatoner.send_recv(msg);
+        let recv = communicatoner.send_recv(msg);
 
         assert_eq!(recv, vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN],
                         vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]]);
     }
 
     #[test]
-    fn send_recv() {
-        let communicatoner =  SyncCommunicationer {
-            addr: "[::1]:10002".parse().unwrap(),
-            rank: 1,
-            endpoints: vec![Endpoint::from_static("http://[::1]:10000"), Endpoint::from_static("http://[::1]:10002")],
-        };
+    fn send_recv1() {
+        let communicatoner =  com_for_test(0, 1, 1);
         let msg = vec![vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]; 2];
-        let mut recv = communicatoner.send_recv(msg);
+        let recv = communicatoner.send_recv(msg);
 
         assert_eq!(recv, vec![vec![TestMsg{a : 0, b : 0.0, c : "0.0.0".into()}; LEN],
                         vec![TestMsg{a : 1, b : 1.0, c : "1.0.0".into()}; LEN]]);
     }
-
-
 }

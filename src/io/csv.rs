@@ -74,8 +74,14 @@ impl FileRead for CsvReader {
             let r = r.unwrap();
             let from = r.column(0).as_primitive::<UInt32Type>();
             let to = r.column(1).as_primitive::<UInt32Type>();
-            let arrays = r.columns()[2..].to_vec();
-            edge_buf.extend(EDATA::from(arrays).into_iter().enumerate().map(|(index, data)| {
+            let arrays = if r.num_columns() > 2 {
+                r.columns()[2..].to_vec()
+            }else {
+                vec![]
+            };
+            let data_vec = EDATA::from(arrays, from.len());
+            
+            edge_buf.extend(data_vec.into_iter().enumerate().map(|(index, data)| {
                 Edge {
                     from : from.value(index),
                     to : to.value(index),
@@ -99,38 +105,4 @@ impl CsvReader {
     pub fn new() -> Self {
         CsvReader{}
     }
-}
-
-fn parse_to_primitive<'a, T, I>(iter: I) -> PrimitiveArray<T>
-where
-    T: ArrowPrimitiveType,
-    T::Native: FromStr,
-    I: IntoIterator<Item=&'a str>,
-{
-    PrimitiveArray::from_iter(iter.into_iter().map(|val| T::Native::from_str(val).ok()))
-}
-
-fn parse_strings<'a, I>(iter: I, to_data_type: DataType) -> ArrayRef
-where
-    I: IntoIterator<Item=&'a str>,
-{
-   match to_data_type {
-       DataType::Int32 => Arc::new(parse_to_primitive::<Int32Type, _>(iter)) as _,
-       DataType::UInt32 => Arc::new(parse_to_primitive::<UInt32Type, _>(iter)) as _,
-       _ => unimplemented!()
-   }
-}
-
-pub fn arrow_test() {
-    let tmp = vec!["12"; 100000000];
-
-    let mut start = Instant::now();
-    let array = parse_strings(tmp, DataType::Int32);
-    // 输出运行时间（以秒为单位）
-    println!("程序运行时间: {:.2?}", Instant::now() - start);
-    
-    start = Instant::now();
-    let integers = array.as_any().downcast_ref::<Int32Array>().unwrap();
-    println!("程序运行时间: {:.2?}", Instant::now() - start);
-    assert_eq!(integers.values(), &[1, 2, 3])
 }

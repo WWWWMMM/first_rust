@@ -1,16 +1,17 @@
 use arrow::array::{ArrayRef, Int32Array, StringArray, Float32Array};
+use bincode::{Encode, Decode};
 
 use super::FromArrow;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Encode, Decode)]
 pub struct MyEDATA {
-    i32_data : i32,
-    f32_data : f32,
-    str_data : String,
+    pub i32_data : i32,
+    pub f32_data : f32,
+    pub str_data : String,
 }
 
 impl FromArrow for MyEDATA {
-    fn from(arrow_data : Vec<ArrayRef>) -> Vec<Self>
+    fn from(arrow_data : Vec<ArrayRef>, len : usize) -> Vec<Self>
         where Self: Sized 
     {
         let i32_data = arrow_data[0].as_any().downcast_ref::<Int32Array>().unwrap();
@@ -24,6 +25,17 @@ impl FromArrow for MyEDATA {
                 str_data : str_data.value(index).into(),
             }
         }).collect()
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Encode, Decode)]
+pub struct MyEmpty {}
+
+impl FromArrow for MyEmpty {
+    fn from(arrow_data : Vec<ArrayRef>, len : usize) -> Vec<Self>
+        where Self: Sized 
+    {
+        vec![MyEmpty{}; len]
     }
 }
 
@@ -43,5 +55,15 @@ mod tests {
         assert_eq!(edges, vec![
             Edge { from: 1, to: 2, data: MyEDATA { i32_data: 4, f32_data: 4.0, str_data: "4.00".into() } }, 
             Edge { from: 2, to: 3, data: MyEDATA { i32_data: 5, f32_data: 5.0, str_data: "5.00".into() } }]);
+    }
+
+    #[test]
+    fn test_read_empty() {
+        // arrow_test();
+        let a = CsvReader::new();
+        let mut read = ReadOption::default();
+        read.header = "from:uint,to:uint".into();
+        let edges = a.read_edge::<MyEmpty>("data/pagerank.csv".into(), read);
+        // println!("{:?}", edges);
     }
 }

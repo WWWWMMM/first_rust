@@ -9,7 +9,7 @@ pub mod example;
 use data::*;
 
 pub trait FromArrow {
-    fn from(arrow_data : Vec<ArrayRef>) -> Vec<Self> 
+    fn from(arrow_data : Vec<ArrayRef>, len : usize) -> Vec<Self> 
         where Self: Sized; 
 }
 
