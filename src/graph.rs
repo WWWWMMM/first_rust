@@ -60,7 +60,7 @@ pub trait SeqPartition : Pratition {
     fn new(degrees : Vec<Vid>, graph_info : &GraphInfo, cluster_info : &ClusterInfo) -> Self;
     fn impl_partition<EDATA>(&self, edges : Vec<Edge<EDATA>>, communication : &impl MyMpi) -> Vec<Edge<EDATA>>
     where
-        EDATA : Clone + Send,
+        EDATA : Clone + Send + Debug,
         Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode;
 
     fn start_id(&self) -> Vid;
@@ -118,7 +118,7 @@ impl SeqPartition for SeqSPartition {
 
     fn impl_partition<EDATA>(&self, edges : Vec<Edge<EDATA>>, communication : &impl MyMpi) -> Vec<Edge<EDATA>> 
     where
-        EDATA : Clone + Send,
+        EDATA : Clone + Send + Debug,
         Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
     {
         println!("impl partition");
@@ -134,9 +134,10 @@ impl SeqPartition for SeqSPartition {
                     let p1 = self.vertex_partition(&b.from);
                     let p2 = self.vertex_partition(&b.to);
                     if p1 != p2 {
-                        a[p2].push(b);
-                    }else {
                         a[p1].push(b.clone());
+                        a[p2].push(b);
+                        
+                    }else {
                         a[p2].push(b);
                     }
                     a
@@ -157,6 +158,7 @@ impl SeqPartition for SeqSPartition {
                         .collect()
                 }
             );
+        // println!("{:?}", msgs);
         let recv = communication.send_recv::<Vec<Edge<EDATA>>>(msgs);
         
         recv.into_par_iter().flatten().collect()
@@ -216,7 +218,7 @@ where
     Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
 {
     pub fn nbr(&self, id : usize) -> &Vec<NearEdge<EDATA>> {
-        &self.g[id - self.partition.start_id() as usize]
+        &self.g[id]
     }
 
     pub fn new(edges : Vec<Edge<EDATA>>, communication : &impl MyMpi) -> Self 
@@ -225,6 +227,7 @@ where
         let cluster_info = communication.get_cluster_info();
         let partition = PART::new(vec![], &graph_info, cluster_info);
         let edges = partition.impl_partition(edges, communication);
+        // println!("{:?}", edges);
         let global_vertexs = graph_info.vertex_num as usize;
         println!("builg g");
         
@@ -281,7 +284,9 @@ where
 {
     type PART = PART;
     fn degrees(&self) -> Vec<Vid> {
-        self.g.iter().map(|x| x.len() as Vid).collect()
+        (self.partition.start_id()..self.partition.end_id()).map(|i|{
+            self.g[i as usize].len() as Vid
+        }).collect()
     }
 
     fn get_array<T>(&self, init_data : T) -> Vec<T> 
