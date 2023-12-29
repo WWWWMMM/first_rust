@@ -4,7 +4,7 @@ use rayon::iter::{IntoParallelRefMutIterator, IntoParallelRefIterator, ParallelI
 
 use crate::{graph::{Graph, SeqPartition, NearGraph}, common::{base_structure::{Edge, Vid}, util::SharedPtr}, parallel::server::MyMpi};
 
-fn pagerank<EDATA, PART>(graph : NearGraph<EDATA, PART>, communication : &impl MyMpi) -> Vec<f32> 
+pub fn pagerank<EDATA, PART>(graph : NearGraph<EDATA, PART>, communication : &impl MyMpi) -> Vec<f32> 
 where
     PART : SeqPartition + Sync,
     EDATA : Clone + Send + Sync + Debug,
@@ -31,7 +31,7 @@ where
         recv.into_par_iter().flatten().collect()
     };
 
-    let iteration = 20;
+    let iteration = 100;
     let damping = 0.85;
     let p = SharedPtr::new(local_pr.as_mut_ptr());
     for i in 0..iteration {

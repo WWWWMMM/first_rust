@@ -226,39 +226,49 @@ where
         let partition = PART::new(vec![], &graph_info, cluster_info);
         let edges = partition.impl_partition(edges, communication);
         let global_vertexs = graph_info.vertex_num as usize;
-        let g = edges
-            .into_par_iter()
-            .fold(
-                ||{
-                    vec![vec![]; global_vertexs]
-                }, 
-                |mut a, b|{
-                    a[b.from as usize].push(NearEdge{to : b.to, data : b.data.clone() });
-                    a[b.to as usize].push(NearEdge{to : b.from, data : b.data });
-                    a
-                })
-            .reduce(
-                ||{
-                    vec![vec![]; global_vertexs]
-                }, 
-                |mut vec1, vec2| {
-                    vec1
-                        .into_par_iter()
-                        .zip(vec2.into_par_iter())
-                        .map(
-                            |(mut v1, v2)| {
-                                v1.par_extend(v2);
-                                v1
-                            })
-                        .collect()
-                }
-            );
+        println!("builg g");
+        
+        let mut g: Vec<Vec<_>> = vec![vec![]; global_vertexs];
+        edges.into_iter().for_each(|b| {
+            g[b.from as usize].push(NearEdge{to : b.to, data : b.data.clone() });
+            g[b.to as usize].push(NearEdge{to : b.from, data : b.data });
+        });
+
+        // 
+        // let g = edges
+        //     .into_par_iter()
+        //     .fold(
+        //         ||{
+        //             vec![vec![]; global_vertexs]
+        //         }, 
+        //         |mut a, b|{
+        //             a[b.from as usize].push(NearEdge{to : b.to, data : b.data.clone() });
+        //             a[b.to as usize].push(NearEdge{to : b.from, data : b.data });
+        //             a
+        //         })
+        //     .reduce(
+        //         ||{
+        //             vec![vec![]; global_vertexs]
+        //         }, 
+        //         |mut vec1, vec2| {
+        //             vec1
+        //                 .into_par_iter()
+        //                 .zip(vec2.into_par_iter())
+        //                 .map(
+        //                     |(mut v1, v2)| {
+        //                         v1.par_extend(v2);
+        //                         v1
+        //                     })
+        //                 .collect()
+        //         }
+        //     );
         let build_result = NearGraph {
             graph_info : graph_info,
             g : g,
             partition : partition
         };
-        println!("{:?}", build_result);
+        println!("builg g over");
+        // println!("{:?}", build_result);
         build_result
     }
 }

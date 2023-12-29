@@ -1,12 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::marker::Send;
+use std::time::Duration;
 use std::time::Instant;
 
 use bincode::Decode;
 use bincode::Encode;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
+use tokio::runtime;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -87,11 +89,19 @@ pub struct SyncCommunicationer {
 
 impl MyMpi for SyncCommunicationer {
     fn send_recv_binary(&self, msgs : Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+        println!("\na send_recv");
+
         let t0 = Instant::now();
         let mut msgs = msgs;
         let mut all_length = msgs.iter().map(|x| x.len()).fold(0u64, |a, b| a + b as u64);
 
-        let rt  = Runtime::new().unwrap();
+        // let rt  = Runtime::new().unwrap();
+        let rt = runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
         rt.block_on(async {
             let partitions = self.endpoints.len();
             
@@ -114,6 +124,7 @@ impl MyMpi for SyncCommunicationer {
                 }).await.unwrap();
             });
             
+            tokio::time::sleep(Duration::from_micros(5)).await;
             // send msg
             for i in 0..msgs.len() {
                 if i == self.cluster_info.rank {
@@ -125,12 +136,18 @@ impl MyMpi for SyncCommunicationer {
                     let rank = self.cluster_info.rank as u32;
                     println!("rank {} spawn send task.", self.cluster_info.rank);
                     set.spawn(async move {
+                        let tmp = Instant::now();
                         let mut client = loop {
                             let a = CommunicationClient::connect(endpoint.clone()).await;
                             if a.is_ok() {
                                 break a.unwrap()
+                            }else {
+                                println!("waiting connect.");
                             }
                         };
+                        println!("connect cost: {:?}", Instant::now() - tmp);
+
+                        let tmp2 = Instant::now();
                         let mut splited_msg = msg.chunks(MAX_BYTE_SEND_PER_MSG).map(|x| {
                             Bytes {val : x.to_vec(), from : rank, finish : false}
                         }).collect::<Vec<Bytes>>();
@@ -139,11 +156,14 @@ impl MyMpi for SyncCommunicationer {
                             Ok(response) => println!("{} recv Ack: {:?}", rank, response.into_inner()),
                             Err(e) => println!("something went wrong: {:?}", e),
                         };
+
+                        println!("send msg to one p cost: {:?}", Instant::now() - tmp2);
                     });
                 }
             }
 
             // recv msg
+            let tmp = Instant::now();
             let mut finish = vec![false; partitions];
             finish[self.cluster_info.rank] = true;
             let mut finish_count = 1;
@@ -158,13 +178,14 @@ impl MyMpi for SyncCommunicationer {
                     }
                 }
             }
+            println!("recv all msgs cost: {:?}", Instant::now() - tmp);
 
             // shutdown server
             println!("shotdown: {}", self.cluster_info.rank);
             shotdown_send.send(()).unwrap();
             while let Some(_) = set.join_next().await {}
 
-            println!("send {all_length} cost: {:?}", Instant::now() - t0);
+            println!("send {all_length} cost: {:?}\n", Instant::now() - t0);
             res
         })
     }
@@ -180,7 +201,7 @@ impl MyMpi for SyncCommunicationer {
         let msgs : Vec<Vec<u8>> = msgs.into_par_iter().map(|x|{
             serilazer.encode(x)
         }).collect();
-        println!("encode cost: {:?}", Instant::now() - t0);
+        // println!("encode cost: {:?}", Instant::now() - t0);
 
         let recv = self.send_recv_binary(msgs);
 
@@ -188,7 +209,7 @@ impl MyMpi for SyncCommunicationer {
         let res = recv.into_par_iter().map(|x|{
             serilazer.decode(x)
         }).collect();
-        println!("decode cost: {:?}", Instant::now() - t1);
+        // println!("decode cost: {:?}", Instant::now() - t1);
 
         res
     }

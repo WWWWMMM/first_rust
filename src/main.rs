@@ -14,6 +14,9 @@ pub mod parallel;
 pub mod graph;
 pub mod algo;
 
+pub mod a;
+pub mod b;
+
 fn main() {
 
 }
