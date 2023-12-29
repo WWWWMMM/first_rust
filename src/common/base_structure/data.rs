@@ -279,7 +279,7 @@ impl OperationBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::Serilazer;
+    use crate::common::util::Serilazer;
 
     #[test]
     fn convert_dataunit() {

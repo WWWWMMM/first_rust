@@ -30,7 +30,7 @@ pub struct ReadOption {
     /// 文件的header。如果被设置，这会覆盖文件第一行的header
     pub header : String,
 
-    /// 数据包括的列，不包括顶点id
+    /// 数据包括的列的name，不包括顶点id
     pub include_columns : Vec<String>,
     
     /// 边表的起点或者点表的点

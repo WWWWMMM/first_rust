@@ -28,7 +28,7 @@ use communication::{Bytes, Ack};
 
 use crate::common::constance::MAX_BYTE_SEND_PER_MSG;
 use crate::graph::ClusterInfo;
-use crate::util::Serilazer;
+use crate::common::util::Serilazer;
 
 struct Receiver {
     channel : Arc<Mutex<Sender<Bytes>>>,

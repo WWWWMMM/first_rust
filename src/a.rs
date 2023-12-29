@@ -5,8 +5,6 @@ fn main() {
 
     let graph = NearGraph::<MyEmpty, SeqSPartition>::new(edges, &communicatoner);
 
-    // println!("graph build compelete");
-
     let pr = pagerank(graph, &communicatoner);
 
     // println!("rank 1: {:?}", pr);

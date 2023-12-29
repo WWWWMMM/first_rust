@@ -6,7 +6,6 @@ use crate::io::{FileRead, ReadOption, example::MyEDATA};
 
 use std::{fmt::Debug, sync::Arc};
 
-pub mod util;
 pub mod traits;
 pub mod common;
 pub mod io; 

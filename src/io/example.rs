@@ -3,6 +3,9 @@ use bincode::{Encode, Decode};
 
 use super::FromArrow;
 
+/// 实现FromArrow的EDATA类型
+/// 先确定EDATA需要支持的所有trait，在已知数据类型的情况，最好能derive后能够直接用
+
 #[derive(Debug, PartialEq, Clone, Encode, Decode)]
 pub struct MyEDATA {
     pub i32_data : i32,

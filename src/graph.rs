@@ -234,7 +234,7 @@ where
             g[b.to as usize].push(NearEdge{to : b.from, data : b.data });
         });
 
-        // 
+        // 这个并行方式并不行
         // let g = edges
         //     .into_par_iter()
         //     .fold(

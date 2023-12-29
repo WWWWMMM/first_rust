@@ -2,6 +2,7 @@ use std::{fmt::format, sync::Arc, str::FromStr, time::Instant, fs::File, io::{Bu
 
 use arrow::{csv::ReaderBuilder, array::{AsArray, Int32Array, Array, PrimitiveArray, ArrayRef}, datatypes::{Int32Type, UInt32Type, ArrowPrimitiveType}};
 use arrow_schema::{Schema, Field, DataType};
+use rayon::iter::ParallelExtend;
 
 use super::*;
 
@@ -38,9 +39,7 @@ fn get_schema(path : &str, option : &ReadOption) -> Schema {
     Schema::new(fields)
 }
 
-pub struct CsvReader {
-    
-}
+pub struct CsvReader {}
 
 impl FileRead for CsvReader {
     fn read_edge<EDATA>(&self, path : String, option : ReadOption)-> Vec<Edge<EDATA>> 
@@ -81,6 +80,7 @@ impl FileRead for CsvReader {
             };
             let data_vec = EDATA::from(arrays, from.len());
             
+            // 用par_extend 和 into_par_iter
             edge_buf.extend(data_vec.into_iter().enumerate().map(|(index, data)| {
                 Edge {
                     from : from.value(index),
@@ -91,7 +91,6 @@ impl FileRead for CsvReader {
         }
 
         edge_buf
-        // (buf, headers)
     }
 
     fn read_vertex<VDATA>(&self, path : String, option : ReadOption)-> Vec<Vertex<VDATA>>
