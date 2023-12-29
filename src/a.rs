@@ -5,7 +5,11 @@ fn main() {
 
     let graph = NearGraph::<MyEmpty, SeqSPartition>::new(edges, &communicatoner);
 
-    let pr = pagerank(graph, &communicatoner);
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(3).build().unwrap();
+    let pr = pool.install(||pagerank(graph, &communicatoner));
 
+    for i in 0..10 {
+        println!("{i}: {}", pr[i]);
+    }
     // println!("rank 1: {:?}", pr);
 }

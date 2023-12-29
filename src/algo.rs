@@ -10,18 +10,14 @@ where
     EDATA : Clone + Send + Sync + Debug,
     Vec<Edge<EDATA>> : IntoParallelIterator<Item = Edge<EDATA>> + Encode + Decode,
 {
+
     let vertexs = graph.graph_info.vertex_num as usize;
     let start_id = graph.partition().start_id() as usize;
     let end_id = graph.partition().end_id() as usize;
 
     let local_degree = graph.degrees();
-    let mut local_pr : Vec<f32> = local_degree.par_iter().map(|&d| {
-        if d == 0 {
-            1.0
-        }else {
-            1.0 / d as f32
-        }
-    }).collect();
+    // println!("local_degree: {:?}", local_degree);
+    let mut local_pr : Vec<f32> = vec![1.0; local_degree.len()];
 
     let global_degree : Vec<u32> = {
         let msgs = vec![local_degree; communication.partitions()];
@@ -30,6 +26,7 @@ where
 
         recv.into_par_iter().flatten().collect()
     };
+    // println!("global_degree: {:?}", global_degree);
 
     let iteration = 100;
     let damping = 0.85;
@@ -48,6 +45,7 @@ where
         t0 = Instant::now();
         let global_pr : Vec<f32> = recv.into_par_iter().flatten().collect();
         println!("get global_pr cost: {:?}", Instant::now() - t0);
+        // println!("get global_pr {:?}", global_pr);
 
         t0 = Instant::now();
         (start_id..end_id).into_par_iter().for_each(|id|{
@@ -56,11 +54,13 @@ where
             nbr.iter().for_each(|edge| {
                 sum += global_pr[edge.to as usize] / global_degree[edge.to as usize] as f32;
             });
+            // println!("id: {id} sum: {sum} bnr: {:?}", nbr);
             unsafe {
-                *p.add(id) = 1.0 - damping + damping * sum;
+                *p.add(id - start_id) = 1.0 - damping + damping * sum;
             };
         });
         println!("calc local pr cost: {:?}", Instant::now() - t0);
+        // println!("calc local prr {:?}", local_pr);
 
         println!("------------------------------iter {i} cost: {:?}", Instant::now() - t00);
     }
@@ -81,7 +81,7 @@ mod tests {
         let a = CsvReader::new();
         let mut read = ReadOption::default();
         read.header = "from:uint,to:uint".into();
-        let edges = a.read_edge::<MyEmpty>("data/pagerank.csv".into(), read);
+        let edges = a.read_edge::<MyEmpty>("data/tmp.csv".into(), read);
 
         println!("read compelete");
 
